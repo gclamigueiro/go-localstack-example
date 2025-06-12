@@ -1,0 +1,66 @@
+services:
+  server:
+    container_name: go-localstack-server
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    environment:
+      AWS_ENDPOINT: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "8090:8090"
+    networks:
+      - go-localstack-net
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  poller:
+    container_name: go-localstack-poller
+    build:
+      context: .
+      dockerfile: ./Dockerfile.poller
+    environment:
+      AWS_ENDPOINT: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    networks:
+      - go-localstack-net
+    depends_on:
+      localstack:
+        condition: service_healthy
+      server: # don't depend on server, just to ensure poller starts after server, for logging purposes
+        condition: service_started
+
+  localstack:
+    container_name: go-localstack-localstack
+    image: localstack/localstack:latest
+    ports:
+      - "127.0.0.1:4566:4566" 
+      - "127.0.0.1:4510-4559:4510-4559"
+    environment:
+      SERVICES: "sqs,s3,sns"
+      GATEWAY_LISTEN: "4566"
+      DEBUG: "1"
+      SQS_ENDPOINT_STRATEGY: "off"
+    networks:
+      - go-localstack-net
+    healthcheck:
+      # this healthcheck is to ensure the queue is created before the poller starts, 
+      # it is a little hacky, just to avoid the poller starting before the queue is created
+      test: >
+        bash -c "awslocal sqs get-queue-url --queue-name customer1-sqs --region us-east-1"
+      #test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s   
+    volumes:
+      - "./aws-init/init.sh:/etc/localstack/init/ready.d/init-aws.sh"
+      - "/var/run/docker.sock:/var/run/docker.sock" 
+
+networks:
+  go-localstack-net:
